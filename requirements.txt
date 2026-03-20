@@ -1,0 +1,16 @@
+# 金融企业智能分析系统 - Python依赖
+
+# 数据处理
+pandas>=2.0.0
+numpy>=1.24.0
+
+# 数据获取
+akshare>=1.11.0
+
+# 可视化
+matplotlib>=3.7.0
+seaborn>=0.12.0
+
+# 其他工具
+requests>=2.31.0
+lxml>=4.9.0
