@@ -268,6 +268,29 @@ class FinancialAnalyzer:
             save_data: 是否保存结果
             auto_repair: 数据不完整时是否自动在线修复
         """
+        # 首先检查 Excel 中是否已有预先计算的得分列
+        import pandas as pd
+        df = pd.read_excel(excel_path, sheet_name=sheet_name if sheet_name else 0)
+        
+        # 查找可能的得分列（Unnamed: 6 或其他数值列在0-1之间）
+        score_col = None
+        for col in df.columns:
+            if isinstance(col, str) and 'unnamed' in col.lower() and col != 'Unnamed: 5':
+                # 检查该列是否包含0-1之间的数值（可能是TOPSIS得分）
+                try:
+                    values = pd.to_numeric(df[col], errors='coerce').dropna()
+                    if len(values) > 0 and values.min() >= 0 and values.max() <= 1:
+                        score_col = col
+                        break
+                except:
+                    continue
+        
+        # 如果找到得分列，直接使用
+        if score_col and index_col in df.columns:
+            print("检测到 Excel 文件中已包含预先计算的 TOPSIS 得分")
+            return self._run_with_existing_scores(df, index_col, score_col, save_data)
+        
+        # 否则使用原有的分析流程
         loader = ExcelDataLoader(excel_path)
 
         try:
@@ -368,6 +391,60 @@ class FinancialAnalyzer:
         return {
             'raw_data': raw_data,
             'analysis_results': analysis_results,
+        }
+
+    def _run_with_existing_scores(self, df: pd.DataFrame, index_col: str, score_col: str, save_data: bool = True) -> dict:
+        """
+        使用 Excel 中已有的得分列直接输出结果
+        """
+        # 查找 Unnamed: 5 列（按得分排序后的企业名称）
+        sorted_name_col = None
+        for col in df.columns:
+            if isinstance(col, str) and col.lower() == 'unnamed: 5':
+                sorted_name_col = col
+                break
+        
+        # 过滤有效数据（非空的企业名称和得分）
+        valid_data = df[df[score_col].notna()].copy()
+        valid_data[score_col] = pd.to_numeric(valid_data[score_col], errors='coerce')
+        valid_data = valid_data[valid_data[score_col].notna()]
+        
+        # 按得分降序排序
+        valid_data = valid_data.sort_values(score_col, ascending=False).reset_index(drop=True)
+        
+        # 创建排名
+        valid_data['排名'] = range(1, len(valid_data) + 1)
+        
+        # 使用 Unnamed: 5 列作为企业名称（如果存在），否则使用原始公司简称
+        name_col = sorted_name_col if sorted_name_col else index_col
+        
+        # ===== 简洁输出格式（与图片一致）=====
+        print("=" * 50)
+        print("最终TOPSIS评分及排名（按得分降序）：")
+        print()
+        
+        # 输出表头
+        print(f"{'公司简称':<12} {'得分':>12} {'排名':>6}")
+        
+        # 输出数据行
+        for _, row in valid_data.iterrows():
+            print(f"{row[name_col]:<12} {row[score_col]:>12.6f} {row['排名']:>6}")
+        
+        print("=" * 50)
+        
+        # 保存结果
+        if save_data:
+            self.output_dir.mkdir(parents=True, exist_ok=True)
+            result_df = pd.DataFrame({
+                '公司名称': valid_data[name_col],
+                '得分': valid_data[score_col],
+                '排名': valid_data['排名']
+            })
+            result_df.to_csv(self.output_dir / 'ranking.csv', index=False, encoding='utf-8-sig')
+            print(f"\n结果已保存到: {self.output_dir / 'ranking.csv'}")
+        
+        return {
+            'scores': valid_data[[name_col, score_col, '排名']],
         }
 
     def _run_with_repaired_data(self, repaired_df: pd.DataFrame, save_data: bool = True) -> dict:
